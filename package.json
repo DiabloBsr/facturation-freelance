@@ -1,0 +1,50 @@
+{
+  "name": "facturation",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack -p 3001 -H 127.0.0.1",
+    "dev:webpack": "next dev -p 3001 -H 127.0.0.1",
+    "dev:reseau": "next dev --turbopack -p 3001",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "node prisma/seed.mjs",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset",
+    "test": "node scripts/check-styles.mjs && tsx scripts/test.ts",
+    "verify": "node scripts/verify.mjs",
+    "setup": "prisma migrate deploy && prisma generate && node prisma/seed.mjs",
+    "postinstall": "prisma generate"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "@react-pdf/renderer": "^4.6.0",
+    "better-auth": "^1.7.2",
+    "next": "^15.5.23",
+    "pdf-lib": "^1.17.1",
+    "prisma": "^6.16.2",
+    "qrcode": "^1.5.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^15.5.23",
+    "pdf-parse": "^2.4.5",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5"
+  }
+}

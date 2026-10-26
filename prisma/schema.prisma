@@ -1,0 +1,784 @@
+// Facturation freelance — schéma de données
+//
+// Conventions monétaires (voir src/lib/money.ts) :
+//  - Tous les montants sont des entiers en "milli-unités" (x1000).
+//    12 500 Ar  -> 12_500_000
+//  - Toutes les quantités sont des entiers en milli-unités (1,5 jour -> 1500).
+//  - Tous les taux (TVA, remise %, commission, pénalités) sont en points de base
+//    (basis points, x100).  20 % -> 2000   |   1,5 % -> 150
+// Ce choix garantit des calculs exacts (aucun arrondi décimal sur l'argent).
+//
+// ATTENTION : ces entiers sont déclarés en Float, pas en Int. Héritage de
+// l'époque SQLite (Int y était plafonné à 32 bits) conservé tel quel sur
+// Postgres : une colonne double precision représente exactement tout entier
+// jusqu'à 2^53 (~9 000 milliards d'ariary). Les valeurs restent entières :
+// tous les calculs passent par les arrondis de src/lib/money.ts.
+// Les taux, eux, tiennent largement dans un Int (10 000 au maximum).
+//
+// Les champs à valeurs contraintes restent des String validées par les unions
+// TypeScript de src/lib/enums.ts (héritage SQLite, sans enum Prisma).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // URL poolée (PgBouncer Neon) pour l'app, URL directe pour les migrations.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Émetteur : mon entreprise
+// ---------------------------------------------------------------------------
+
+/// Singleton (id = 1) : l'entreprise qui émet les factures.
+
+model Company {
+  id Int @id @default(1)
+
+  // Identité
+  legalName     String  @default("Mon entreprise")
+  tradeName     String?
+  legalForm     String?
+  activity      String?
+  slogan        String?
+  logoData      String? // data URI (image intégrée au PDF)
+  stampData     String? // cachet / tampon
+  signatureData String? // signature scannée
+  signatureName String?
+  signatureRole String?
+
+  // Adresse
+  addressLine1 String?
+  addressLine2 String?
+  postalCode   String?
+  city         String?
+  region       String?
+  country      String  @default("Madagascar")
+
+  // Contact
+  phone   String?
+  mobile  String?
+  email   String?
+  website String?
+
+  // Fiscalité & devises
+  baseCurrency     String  @default("MGA")
+  defaultCurrency  String  @default("MGA")
+  vatRegime        String  @default("EXEMPT") // SUBJECT | EXEMPT | NOT_APPLICABLE
+  defaultVatRate   Int     @default(0) // points de base
+  vatExemptionText String?
+  withholdingLabel String?
+  withholdingRate  Int     @default(0)
+
+  // Conditions commerciales par défaut
+  paymentTermsDays Int     @default(30)
+  latePenaltyRate  Int     @default(0) // points de base, taux annuel
+  recoveryFee      Float   @default(0) // milli-unités
+  discountText     String?
+
+  // Rendu des documents
+  defaultTemplate    String  @default("classique")
+  accentColor        String  @default("#1F4D7A")
+  defaultTerms       String?
+  defaultFooter      String?
+  showAmountInWords  Boolean @default(true)
+  showStampOnPdf     Boolean @default(true)
+  showSignatureOnPdf Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Identifiants légaux de l'émetteur : NIF, STAT, RCS, CIF, n° TVA, SIRET…
+/// Liste libre et ordonnable pour couvrir n'importe quel pays.
+
+model LegalIdentifier {
+  id        String  @id @default(cuid())
+  label     String
+  value     String
+  position  Int     @default(0)
+  showOnPdf Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Coordonnées de paiement : compte bancaire (RIB/IBAN) ou Mobile Money.
+
+model BankAccount {
+  id    String @id @default(cuid())
+  kind  String @default("BANK") // BANK | MOBILE_MONEY | PAYPAL | WISE | OTHER
+  label String
+
+  holder String?
+
+  // Compte bancaire
+  bankName      String?
+  branchName    String?
+  bankCode      String? // code banque
+  branchCode    String? // code guichet
+  accountNumber String? // numéro de compte
+  ribKey        String? // clé RIB
+  iban          String?
+  bic           String?
+
+  // Mobile Money / portefeuille
+  provider    String? // MVola, Orange Money, Airtel Money…
+  phoneNumber String?
+  accountRef  String? // e-mail PayPal, tag Wise…
+
+  currency  String  @default("MGA")
+  isDefault Boolean @default(false)
+  showOnPdf Boolean @default(true)
+  position  Int     @default(0)
+  notes     String?
+
+  documents Document[]
+  payments  Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Référentiels
+// ---------------------------------------------------------------------------
+
+/// Catalogue des devises. `rateToBase` : 1 unité de cette devise vaut
+/// `rateToBase` unités de la devise de base de l'entreprise.
+
+model Currency {
+  code        String  @id // MGA, EUR, USD…
+  name        String
+  symbol      String
+  decimals    Int     @default(2)
+  symbolAfter Boolean @default(true)
+  rateToBase  Float   @default(1)
+  isActive    Boolean @default(true)
+  position    Int     @default(0)
+
+  updatedAt DateTime @updatedAt
+}
+
+model VatRate {
+  id        String  @id @default(cuid())
+  label     String
+  rate      Int // points de base
+  isDefault Boolean @default(false)
+  position  Int     @default(0)
+}
+
+/// Compteur de numérotation, incrémenté de façon atomique.
+
+model NumberSequence {
+  id          String  @id @default(cuid())
+  key         String  @unique // INVOICE | QUOTE | DEPOSIT | CREDIT_NOTE | PROFORMA
+  label       String
+  pattern     String  @default("{PREFIX}-{YYYY}-{SEQ}")
+  prefix      String  @default("FAC")
+  padding     Int     @default(4)
+  nextValue   Int     @default(1)
+  resetPolicy String  @default("YEARLY") // NEVER | YEARLY | MONTHLY
+  lastPeriod  String?
+
+  updatedAt DateTime @updatedAt
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Tiers : clients finaux et agences / intermédiaires
+// ---------------------------------------------------------------------------
+
+/// Un tiers, `kind` distingue le client final de l'agence (ESN, portage,
+/// apporteur d'affaires) qui reçoit la facture pour le compte du client.
+
+model Party {
+  id   String @id @default(cuid())
+  kind String @default("CLIENT") // CLIENT | AGENCY
+  type String @default("COMPANY") // COMPANY | INDIVIDUAL | PUBLIC
+
+  name      String
+  legalName String?
+  legalForm String?
+
+  addressLine1 String?
+  addressLine2 String?
+  postalCode   String?
+  city         String?
+  region       String?
+  country      String  @default("Madagascar")
+
+  email   String?
+  phone   String?
+  website String?
+
+  currency         String  @default("MGA")
+  vatRate          Int?
+  paymentTermsDays Int?
+  commissionRate   Int     @default(0) // agences : commission en points de base
+  withholdingRate  Int     @default(0) // retenue à la source
+  notes            String?
+  isActive         Boolean @default(true)
+
+  identifiers PartyIdentifier[]
+  contacts    Contact[]
+
+  missionsAsClient   Mission[]       @relation("MissionClient")
+  missionsAsAgency   Mission[]       @relation("MissionAgency")
+  documentsBilled    Document[]      @relation("DocumentBillTo")
+  documentsEndClient Document[]      @relation("DocumentEndClient")
+  payouts            Payout[]        @relation("PayoutBeneficiary")
+  payoutRequests     PayoutRequest[] @relation("PayoutRequestBeneficiary")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, isActive])
+}
+
+/// NIF / STAT / RCS / n° TVA… du tiers.
+
+model PartyIdentifier {
+  id      String @id @default(cuid())
+  partyId String
+  party   Party  @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  label     String
+  value     String
+  position  Int     @default(0)
+  showOnPdf Boolean @default(true)
+
+  @@index([partyId])
+}
+
+model Contact {
+  id      String @id @default(cuid())
+  partyId String
+  party   Party  @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  firstName String?
+  lastName  String?
+  role      String?
+  email     String?
+  phone     String?
+  isPrimary Boolean @default(false)
+  notes     String?
+
+  documents Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partyId])
+}
+
+// ---------------------------------------------------------------------------
+// Missions & suivi du temps (CRA)
+// ---------------------------------------------------------------------------
+
+model Mission {
+  id        String  @id @default(cuid())
+  reference String?
+  title     String
+
+  description String?
+
+  clientId String
+  client   Party   @relation("MissionClient", fields: [clientId], references: [id])
+  agencyId String?
+  agency   Party?  @relation("MissionAgency", fields: [agencyId], references: [id])
+  /// Qui reçoit la facture : le client final ou l'agence intermédiaire.
+  billTo   String  @default("CLIENT") // CLIENT | AGENCY
+
+  rateType String @default("DAILY") // DAILY | HOURLY | FIXED
+  rate     Float  @default(0) // milli-unités
+  currency String @default("MGA")
+  vatRate  Int?
+  budget   Float?
+
+  purchaseOrder String?
+  startDate     DateTime?
+  endDate       DateTime?
+  status        String    @default("ACTIVE") // ACTIVE | PAUSED | DONE | ARCHIVED
+  color         String?
+  notes         String?
+
+  timeEntries TimeEntry[]
+  documents   Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([status])
+}
+
+/// Une ligne de compte-rendu d'activité, facturable puis rattachée à
+/// la ligne de facture qui l'a consommée.
+
+model TimeEntry {
+  id        String  @id @default(cuid())
+  missionId String
+  mission   Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+
+  date        DateTime
+  quantity    Float    @default(1000) // milli-unités
+  unit        String   @default("DAY") // DAY | HOUR
+  label       String?
+  description String?
+  billable    Boolean  @default(true)
+  rate        Float? // milli-unités, sinon tarif de la mission
+
+  documentId     String?
+  document       Document?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  documentLineId String?
+  documentLine   DocumentLine? @relation(fields: [documentLineId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([missionId, date])
+  @@index([documentId])
+}
+
+// ---------------------------------------------------------------------------
+// Documents commerciaux
+// ---------------------------------------------------------------------------
+
+/// Devis, facture, facture d'acompte, avoir, proforma.
+
+model Document {
+  id      String  @id @default(cuid())
+  type    String // QUOTE | INVOICE | DEPOSIT | CREDIT_NOTE | PROFORMA
+  number  String? @unique
+  status  String  @default("DRAFT")
+  subject String?
+
+  billToId    String
+  billTo      Party    @relation("DocumentBillTo", fields: [billToId], references: [id])
+  endClientId String?
+  endClient   Party?   @relation("DocumentEndClient", fields: [endClientId], references: [id])
+  contactId   String?
+  contact     Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  missionId   String?
+  mission     Mission? @relation(fields: [missionId], references: [id], onDelete: SetNull)
+
+  issueDate   DateTime  @default(now())
+  dueDate     DateTime?
+  validUntil  DateTime?
+  serviceDate DateTime?
+  sentAt      DateTime?
+  paidAt      DateTime?
+  acceptedAt  DateTime?
+  refusedAt   DateTime?
+  cancelledAt DateTime?
+
+  currency         String @default("MGA")
+  exchangeRate     Float  @default(1)
+  vatMode          String @default("EXCLUSIVE") // EXCLUSIVE | INCLUSIVE | NONE
+  paymentTermsDays Int    @default(30)
+
+  discountType  String @default("NONE") // NONE | PERCENT | AMOUNT
+  /// Points de base si PERCENT, milli-unités si AMOUNT.
+  discountValue Float  @default(0)
+
+  withholdingLabel String?
+  withholdingRate  Int     @default(0)
+
+  // Totaux figés à chaque enregistrement (milli-unités)
+  subtotal      Float @default(0)
+  totalDiscount Float @default(0)
+  totalNet      Float @default(0)
+  totalVat      Float @default(0)
+  totalGross    Float @default(0)
+  totalWithheld Float @default(0)
+  totalDeposits Float @default(0)
+  total         Float @default(0)
+  totalPaid     Float @default(0)
+  balanceDue    Float @default(0)
+
+  purchaseOrder     String?
+  notes             String?
+  terms             String?
+  footer            String?
+  internalNotes     String?
+  template          String  @default("classique")
+  accentColor       String?
+  showAmountInWords Boolean @default(true)
+
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+
+  /// Lien de filiation : avoir -> facture d'origine, acompte -> facture de solde,
+  /// facture -> devis converti.
+  parentId String?
+  parent   Document?  @relation("DocumentLink", fields: [parentId], references: [id], onDelete: SetNull)
+  children Document[] @relation("DocumentLink")
+
+  recurrenceId String?
+  recurrence   Recurrence?  @relation("RecurrenceGenerated", fields: [recurrenceId], references: [id], onDelete: SetNull)
+  recurrences  Recurrence[] @relation("RecurrenceSource")
+
+  lines          DocumentLine[]
+  payments       Payment[]
+  reminders      Reminder[]
+  timeEntries    TimeEntry[]
+  payouts        Payout[]
+  payoutRequests PayoutRequest[] @relation("DocumentPayoutRequests")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type, status])
+  @@index([billToId])
+  @@index([issueDate])
+}
+
+model DocumentLine {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  position    Int     @default(0)
+  kind        String  @default("SERVICE") // SERVICE | PRODUCT | TEXT | SECTION
+  label       String
+  description String?
+
+  quantity      Float  @default(1000) // milli-unités
+  unit          String @default("unité")
+  unitPrice     Float  @default(0) // milli-unités
+  discountType  String @default("NONE") // NONE | PERCENT | AMOUNT
+  discountValue Float  @default(0)
+  vatRate       Int    @default(0)
+
+  // Totaux figés (milli-unités)
+  net   Float @default(0)
+  vat   Float @default(0)
+  gross Float @default(0)
+
+  timeEntries TimeEntry[]
+
+  @@index([documentId])
+}
+
+model Payment {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  date       DateTime @default(now())
+  amount     Float // milli-unités, dans la devise du document
+  currency   String   @default("MGA")
+  /// Cours vers la devise de base au jour de l'encaissement : 1 unité de
+  /// `currency` = N unités de base. Figé à l'enregistrement, 1 si même devise.
+  rateToBase Float    @default(1)
+  method     String   @default("TRANSFER") // TRANSFER | MOBILE_MONEY | CASH | CHECK | CARD | PAYPAL | WISE | OTHER
+  reference  String?
+  notes      String?
+
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+  @@index([date])
+}
+
+/// Relance d'impayé (niveau 1 à 3, puis mise en demeure).
+
+model Reminder {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  level      Int       @default(1)
+  channel    String    @default("EMAIL") // EMAIL | PHONE | LETTER | OTHER
+  plannedFor DateTime?
+  sentAt     DateTime?
+  subject    String?
+  body       String?
+  notes      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([documentId])
+}
+
+/// Justificatif de reversement à un sous-traitant.
+///
+/// Il retrace ce qui a réellement été reçu puis reversé : les prestations dans
+/// la devise de la facture, le cours appliqué par la banque — saisi à la main,
+/// car il diffère du cours mondial — les frais bancaires, et les ajustements
+/// divers. Le net à reverser en découle.
+
+model Payout {
+  id     String   @id @default(cuid())
+  number String?  @unique
+  date   DateTime @default(now())
+  status String   @default("DRAFT") // DRAFT | PAID
+
+  beneficiaryId String
+  beneficiary   Party  @relation("PayoutBeneficiary", fields: [beneficiaryId], references: [id])
+
+  /// Facture d'origine, quand le reversement en découle.
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  /// Devise dans laquelle la prestation a été facturée.
+  sourceCurrency String @default("EUR")
+  /// Devise dans laquelle le sous-traitant est payé.
+  targetCurrency String @default("MGA")
+  /// Cours appliqué par la banque : 1 unité source = N unités cible.
+  exchangeRate   Float  @default(1)
+
+  /// Frais bancaires, en devise cible et en milli-unités.
+  bankFees Float @default(0)
+
+  // Totaux figés (milli-unités)
+  totalSource      Float @default(0)
+  totalConverted   Float @default(0)
+  totalAdjustments Float @default(0)
+  netPayable       Float @default(0)
+
+  paidAt    DateTime?
+  reference String?
+  notes     String?
+
+  lines       PayoutLine[]
+  adjustments PayoutAdjustment[]
+  requests    PayoutRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([beneficiaryId])
+  @@index([date])
+}
+
+/// Une prestation reversée, exprimée dans la devise source.
+
+model PayoutLine {
+  id       String @id @default(cuid())
+  payoutId String
+  payout   Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+
+  position    Int     @default(0)
+  label       String
+  description String?
+  quantity    Float   @default(1000) // milli-unités
+  unit        String  @default("heure")
+  unitPrice   Float   @default(0) // milli-unités, devise source
+  amount      Float   @default(0) // milli-unités, devise source
+
+  @@index([payoutId])
+}
+
+/// Ajustement divers, en devise cible. Le montant peut être négatif.
+
+model PayoutAdjustment {
+  id       String @id @default(cuid())
+  payoutId String
+  payout   Payout @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+
+  position Int    @default(0)
+  label    String
+  amount   Float  @default(0) // milli-unités, devise cible, signé
+
+  @@index([payoutId])
+}
+
+// ---------------------------------------------------------------------------
+// Demandes de facture aux intervenants (espace public)
+// ---------------------------------------------------------------------------
+
+/// Lien public remis à un sous-traitant pour qu'il déclare lui-même ses
+/// prestations. Ses lignes alimentent ensuite le justificatif de reversement
+/// et/ou la facture client.
+///
+/// C'est le seul point d'entrée non authentifié de l'application : le jeton
+/// du lien est la seule clé, il est donc long (32 octets) et n'est stocké
+/// que haché — une fuite de la base ne rouvre aucun lien.
+
+model PayoutRequest {
+  id        String @id @default(cuid())
+  /// SHA-256 du jeton. Le jeton en clair ne vit que dans l'URL du lien.
+  tokenHash String @unique
+
+  beneficiaryId String
+  beneficiary   Party  @relation("PayoutRequestBeneficiary", fields: [beneficiaryId], references: [id], onDelete: Cascade)
+
+  status String @default("PENDING") // PENDING | SUBMITTED | CONVERTED | CANCELLED
+
+  /// Consigne affichée à l'intervenant : période, mission, ce qu'il doit facturer.
+  subject String?
+  /// Devise imposée pour la déclaration : celle de la facture client.
+  currency String @default("EUR")
+
+  expiresAt   DateTime
+  submittedAt DateTime?
+
+  // Renseignés par l'intervenant lors de l'envoi
+  contactEmail   String?
+  paymentMethod  String? // TRANSFER | MOBILE_MONEY | CASH | PAYPAL | WISE | OTHER
+  paymentDetails String? // RIB, numéro MVola, e-mail PayPal…
+  notes          String?
+
+  /// Justificatif de reversement issu de cette demande.
+  payoutId String?
+  payout   Payout? @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+
+  /// Facture client dans laquelle les lignes ont été reprises.
+  documentId String?
+  document   Document? @relation("DocumentPayoutRequests", fields: [documentId], references: [id], onDelete: SetNull)
+
+  lines PayoutRequestLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([beneficiaryId])
+  @@index([status])
+}
+
+/// Une prestation déclarée par l'intervenant, dans la devise de la demande.
+
+model PayoutRequestLine {
+  id        String        @id @default(cuid())
+  requestId String
+  request   PayoutRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  position    Int     @default(0)
+  label       String
+  description String?
+  quantity    Float   @default(1000) // milli-unités
+  unit        String  @default("heure")
+  unitPrice   Float   @default(0) // milli-unités
+  amount      Float   @default(0) // milli-unités, figé à l'envoi
+
+  @@index([requestId])
+}
+
+/// Abonnement : régénère périodiquement une facture à partir d'un document source.
+
+model Recurrence {
+  id   String @id @default(cuid())
+  name String
+
+  frequency        String    @default("MONTHLY") // WEEKLY | MONTHLY | QUARTERLY | YEARLY
+  interval         Int       @default(1)
+  nextRunDate      DateTime
+  endDate          DateTime?
+  occurrencesLimit Int?
+  occurrencesDone  Int       @default(0)
+  active           Boolean   @default(true)
+  lastGeneratedAt  DateTime?
+
+  sourceDocumentId String?
+  sourceDocument   Document?  @relation("RecurrenceSource", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  generated        Document[] @relation("RecurrenceGenerated")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, nextRunDate])
+}
+
+model User {
+  id               String      @id
+  name             String
+  email            String
+  emailVerified    Boolean     @default(false)
+  image            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  twoFactorEnabled Boolean?    @default(false)
+  sessions         Session[]
+  accounts         Account[]
+  twofactors       TwoFactor[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  issuer                String?
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model TwoFactor {
+  id                      String    @id
+  secret                  String
+  backupCodes             String
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime?
+
+  @@index([secret])
+  @@index([userId])
+  @@map("twoFactor")
+}
+
+model RateLimit {
+  id          String @id
+  key         String
+  count       Int
+  lastRequest BigInt
+
+  @@unique([key])
+  @@map("rateLimit")
+}

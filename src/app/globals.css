@@ -1,0 +1,354 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Jetons de design
+   Palette sobre « papier + encre » : fond chaud très clair, encre navy,
+   accents réservés au sens (payé, en retard, brouillon).
+--------------------------------------------------------------------------- */
+
+:root {
+  --bg: #f7f6f3;
+  --bg-subtle: #efede8;
+  --surface: #ffffff;
+  --surface-2: #fbfaf8;
+  --surface-hover: #f4f2ee;
+
+  --border: #e3e0d9;
+  --border-strong: #cdc9c0;
+
+  --text: #1a1815;
+  --text-muted: #6b655c;
+  --text-subtle: #969086;
+  --text-faint: #a8a196;
+
+  --accent: #1f4d7a;
+  --accent-hover: #17395a;
+  --accent-soft: #e8eff6;
+  --accent-border: #b9cee1;
+  --accent-contrast: #ffffff;
+
+  --success: #1f6b4b;
+  --success-soft: #e4f2ea;
+  --success-border: #b3d9c5;
+
+  --warning: #8a5a12;
+  --warning-soft: #fbf0dd;
+  --warning-border: #e8cfa1;
+
+  --danger: #9b2c2c;
+  --danger-soft: #fbe9e9;
+  --danger-border: #eec2c2;
+
+  --info: #1f4d7a;
+  --info-soft: #e8eff6;
+  --info-border: #b9cee1;
+
+  --neutral: #565049;
+  --neutral-soft: #efede8;
+  --neutral-border: #dcd8d0;
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  --shadow-xs: 0 1px 2px rgba(26, 24, 21, 0.05);
+  --shadow-sm: 0 1px 3px rgba(26, 24, 21, 0.07), 0 1px 2px rgba(26, 24, 21, 0.04);
+  --shadow-md: 0 4px 14px rgba(26, 24, 21, 0.08), 0 1px 3px rgba(26, 24, 21, 0.05);
+  --shadow-lg: 0 18px 45px rgba(26, 24, 21, 0.14), 0 4px 12px rgba(26, 24, 21, 0.07);
+
+  --ring: rgba(31, 77, 122, 0.16);
+}
+
+:root:not([data-theme="light"]) {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101113;
+    --bg-subtle: #17181b;
+    --surface: #191b1e;
+    --surface-2: #1f2125;
+    --surface-hover: #24262a;
+
+    --border: #2c2f34;
+    --border-strong: #3d4147;
+
+    --text: #ecebe8;
+    --text-muted: #a5a29c;
+    --text-subtle: #837f79;
+    --text-faint: #6b6862;
+
+    --accent: #6ea8dc;
+    --accent-hover: #8dbce7;
+    --accent-soft: #17293a;
+    --accent-border: #2f5a80;
+    --accent-contrast: #0d1620;
+
+    --success: #6fc79b;
+    --success-soft: #14291f;
+    --success-border: #2c5943;
+
+    --warning: #d9a94f;
+    --warning-soft: #2b2114;
+    --warning-border: #5c4623;
+
+    --danger: #e07b7b;
+    --danger-soft: #2c1717;
+    --danger-border: #5e3030;
+
+    --info: #6ea8dc;
+    --info-soft: #17293a;
+    --info-border: #2f5a80;
+
+    --neutral: #a5a29c;
+    --neutral-soft: #232528;
+    --neutral-border: #35383d;
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 18px 45px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+
+    --ring: rgba(110, 168, 220, 0.24);
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #101113;
+  --bg-subtle: #17181b;
+  --surface: #191b1e;
+  --surface-2: #1f2125;
+  --surface-hover: #24262a;
+
+  --border: #2c2f34;
+  --border-strong: #3d4147;
+
+  --text: #ecebe8;
+  --text-muted: #a5a29c;
+  --text-subtle: #837f79;
+  --text-faint: #6b6862;
+
+  --accent: #6ea8dc;
+  --accent-hover: #8dbce7;
+  --accent-soft: #17293a;
+  --accent-border: #2f5a80;
+  --accent-contrast: #0d1620;
+
+  --success: #6fc79b;
+  --success-soft: #14291f;
+  --success-border: #2c5943;
+
+  --warning: #d9a94f;
+  --warning-soft: #2b2114;
+  --warning-border: #5c4623;
+
+  --danger: #e07b7b;
+  --danger-soft: #2c1717;
+  --danger-border: #5e3030;
+
+  --info: #6ea8dc;
+  --info-soft: #17293a;
+  --info-border: #2f5a80;
+
+  --neutral: #a5a29c;
+  --neutral-soft: #232528;
+  --neutral-border: #35383d;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 18px 45px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  --ring: rgba(110, 168, 220, 0.24);
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-faint: var(--text-faint);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-border: var(--accent-border);
+  --color-accent-contrast: var(--accent-contrast);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-border: var(--success-border);
+
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-border: var(--info-border);
+
+  --color-neutral: var(--neutral);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-neutral-border: var(--neutral-border);
+
+  --radius-card: var(--radius-lg);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono",
+    Menlo, Consolas, monospace;
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv05" 1, "ss01" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Chiffres alignés partout où l'on compare des montants. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Halo de focus commun à tous les contrôles. */
+.focus-halo:focus-visible,
+.focus-halo:has(:focus-visible) {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+  border-color: var(--accent);
+}
+
+/* Barre de défilement discrète. */
+@supports (scrollbar-width: thin) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+/* Retire les flèches des champs numériques : les montants se saisissent au clavier. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* ---------------------------------------------------------------------------
+   Animations
+--------------------------------------------------------------------------- */
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+.animate-fade-rise {
+  animation: fade-rise 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-slide-in {
+  animation: slide-in-right 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Impression : l'aperçu du document sort proprement sans la navigation.
+--------------------------------------------------------------------------- */
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #ffffff;
+  }
+}
